@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Compteur FLUX/DATA</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            margin-top: 20px;
+        }
+        .main-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            width: 100%;
+        }
+        .info-box {
+            margin-bottom: 20px;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            text-align: left;
+        }
+        .info-box p {
+            font-size: 1.1em;
+        }
+        canvas {
+            max-width: 1200px;
+            max-height: 800px;
+        }
+        .dark-mode {
+            background-color: #121212;
+            color: #ffffff;
+        }
+        .convert-box, .simulate-box {
+            margin-top: 30px;
+            padding: 15px;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            text-align: center;
+            width: 60%;
+        }
+        .convert-box h3, .simulate-box h3 {
+            font-size: 1.2em;
+            margin-bottom: 15px;
+        }
+        .convert-box .input-group, .simulate-box .input-group {
+            display: flex;
+            justify-content: center;
+            margin-bottom: 10px;
+        }
+        .convert-box input, .simulate-box input {
+            width: 45%;
+            margin: 0 5px;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 1em;
+        }
+    </style>
+</head>
+<body>
+    <!-- Bouton pour activer/désactiver le mode sombre -->
+    <button onclick="toggleDarkMode()" style="margin-bottom: 20px;">Activer/Désactiver le mode sombre</button>
+
+    <div class="main-container">
+        <!-- Boîte d'information pour les prix -->
+        <div class="info-box">
+            <h2>Prix en temps réel</h2>
+            <p><strong>Prix FLUX :</strong> <span id="flux-price">Chargement...</span> USDT</p>
+            <p><strong>Prix DATA :</strong> <span id="data-price">Chargement...</span> USDT</p>
+            <p><strong>Ratio :</strong> <span id="ratio">Chargement...</span></p>
+            <p><small>Dernière mise à jour :</small> <span id="timestamp">-</span></p>
+            <p><strong>Seuil d'alerte :</strong></p>
+            <input type="number" id="alert-threshold" placeholder="Saisir un seuil">
+        </div>
+
+        <!-- Sélection de la période -->
+        <div style="margin-bottom: 20px;">
+            <label for="time-range">Afficher les données des dernières :</label>
+            <select id="time-range" onchange="updateChartData()">
+                <option value="1">1 heure</option>
+                <option value="6">6 heures</option>
+                <option value="12">12 heures</option>
+                <option value="24" selected>24 heures</option>
+            </select>
+        </div>
+
+        <!-- Graphique -->
+        <canvas id="fluxDataChart"></canvas>
+
+        <!-- Convertisseur -->
+        <div class="convert-box">
+            <h3>Convertisseur</h3>
+            <div class="input-group">
+                <input type="number" id="flux-input" placeholder="Nombre de FLUX" oninput="updateFromFlux()">
+                <input type="text" id="data-output" placeholder="Équiv. DATA" readonly>
+            </div>
+            <div class="input-group">
+                <input type="number" id="data-input" placeholder="Nombre de DATA" oninput="updateFromData()">
+                <input type="text" id="flux-output" placeholder="Équiv. FLUX" readonly>
+            </div>
+        </div>
+
+        <!-- Simulateur -->
+        <div class="simulate-box">
+            <h3>Simulateur avec Ratio Personnalisé</h3>
+            <div class="input-group">
+                <input type="number" id="custom-ratio" placeholder="Ratio personnalisé" oninput="updateSimulation()">
+            </div>
+            <div class="input-group">
+                <input type="number" id="simulate-flux-input" placeholder="Nombre de FLUX" oninput="updateSimulation()">
+                <input type="text" id="simulate-data-output" placeholder="Équiv. DATA" readonly>
+            </div>
+            <div class="input-group">
+                <input type="number" id="simulate-data-input" placeholder="Nombre de DATA" oninput="updateSimulation()">
+                <input type="text" id="simulate-flux-output" placeholder="Équiv. FLUX" readonly>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let currentRatio = 0; // Variable globale pour stocker le ratio actuel
+
+        const ctx = document.getElementById('fluxDataChart').getContext('2d');
+        const chart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: [],
+                datasets: [{
+                    label: 'FLUX/DATA',
+                    data: [],
+                    borderColor: 'rgba(75, 192, 192, 1)',
+                    backgroundColor: 'rgba(75, 192, 192, 0.2)',
+                    borderWidth: 2,
+                    fill: true
+                }]
+            },
+            options: {
+                responsive: true,
+                scales: {
+                    x: {
+                        type: 'time',
+                        time: {
+                            unit: 'minute'
+                        },
+                        title: {
+                            display: true,
+                            text: 'Temps'
+                        }
+                    },
+                    y: {
+                        title: {
+                            display: true,
+                            text: 'Ratio'
+                        }
+                    }
+                }
+            }
+        });
+
+        function saveChartData() {
+            const chartData = {
+                labels: chart.data.labels,
+                data: chart.data.datasets[0].data,
+            };
+            localStorage.setItem('fluxDataChart', JSON.stringify(chartData));
+        }
+
+        function restoreChartData() {
+            const storedData = localStorage.getItem('fluxDataChart');
+            if (storedData) {
+                const { labels, data } = JSON.parse(storedData);
+                const now = new Date();
+
+                // Filtrer les données en fonction de la période sélectionnée
+                const timeRange = parseInt(document.getElementById('time-range').value) || 24; // Période choisie
+                const timeRangeAgo = new Date(now.getTime() - timeRange * 60 * 60 * 1000);
+
+                const filteredLabels = labels.filter((label) => new Date(label) >= timeRangeAgo);
+                const filteredData = data.slice(labels.length - filteredLabels.length);
+
+                // Mettre à jour le graphique
+                chart.data.labels = filteredLabels;
+                chart.data.datasets[0].data = filteredData;
+                chart.update();
+            }
+        }
+
+        function updateChartData() {
+            restoreChartData();
+        }
+
+        async function fetchRatioAndUpdateChart() {
+            try {
+                const fluxResponse = await fetch('https://api.binance.com/api/v3/ticker/price?symbol=FLUXUSDT');
+                const fluxData = await fluxResponse.json();
+                const fluxPrice = parseFloat(fluxData.price);
+
+                const dataResponse = await fetch('https://api.binance.com/api/v3/ticker/price?symbol=DATAUSDT');
+                const dataData = await dataResponse.json();
+                const dataPrice = parseFloat(dataData.price);
+
+                const ratio = fluxPrice / dataPrice;
+                currentRatio = ratio;
+                const now = new Date();
+
+                // Mettre à jour les textes
+                document.getElementById('flux-price').textContent = fluxPrice.toFixed(4);
+                document.getElementById('data-price').textContent = dataPrice.toFixed(4);
+
+                const ratioElement = document.getElementById('ratio');
+                ratioElement.textContent = ratio.toFixed(4);
+                ratioElement.style.color = ratio < 15 ? 'green' : 'blue';
+
+                document.getElementById('timestamp').textContent = now.toLocaleTimeString();
+
+                // Ajouter les données au graphique
+                chart.data.labels.push(now);
+                chart.data.datasets[0].data.push(ratio);
+
+                // Supprimer les données plus anciennes que 24 heures
+                const twentyFourHoursAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+                while (chart.data.labels.length > 0 && chart.data.labels[0] < twentyFourHoursAgo) {
+                    chart.data.labels.shift();
+                    chart.data.datasets[0].data.shift();
+                }
+
+                // Sauvegarder les données
+                saveChartData();
+
+                chart.update();
+
+                // Vérifier le seuil d'alerte
+                const alertThreshold = parseFloat(document.getElementById('alert-threshold').value);
+                if (!isNaN(alertThreshold) && ratio > alertThreshold) {
+                    alert("Le ratio a dépassé le seuil fixé !");
+                }
+            } catch (error) {
+                console.error("Erreur lors de la récupération des données : ", error);
+                document.getElementById('ratio').textContent = "Erreur : Impossible de récupérer les données.";
+                document.getElementById('ratio').style.color = 'red';
+            }
+        }
+
+        setInterval(fetchRatioAndUpdateChart, 5000); // Mise à jour toutes les 5 secondes
+        restoreChartData(); // Restaurer les données au chargement de la page
+
+        function toggleDarkMode() {
+            document.body.classList.toggle('dark-mode');
+        }
+
+        // Fonction pour mettre à jour les équivalents à partir de FLUX
+        function updateFromFlux() {
+            const fluxValue = parseFloat(document.getElementById('flux-input').value);
+            const dataOutput = document.getElementById('data-output');
+            if (!isNaN(fluxValue) && currentRatio > 0) {
+                dataOutput.value = (fluxValue * currentRatio).toFixed(4);
+            } else {
+                dataOutput.value = '';
+            }
+        }
+
+        // Fonction pour mettre à jour les équivalents à partir de DATA
+        function updateFromData() {
+            const dataValue = parseFloat(document.getElementById('data-input').value);
+            const fluxOutput = document.getElementById('flux-output');
+            if (!isNaN(dataValue) && currentRatio > 0) {
+                fluxOutput.value = (dataValue / currentRatio).toFixed(4);
+            } else {
+                fluxOutput.value = '';
+            }
+        }
+
+        // Fonction pour mettre à jour les conversions dans le simulateur
+        function updateSimulation() {
+            const customRatio = parseFloat(document.getElementById('custom-ratio').value);
+            const simulateFluxInput = parseFloat(document.getElementById('simulate-flux-input').value);
+            const simulateDataInput = parseFloat(document.getElementById('simulate-data-input').value);
+
+            const simulateDataOutput = document.getElementById('simulate-data-output');
+            const simulateFluxOutput = document.getElementById('simulate-flux-output');
+
+            if (!isNaN(simulateFluxInput) && !isNaN(customRatio) && customRatio > 0) {
+                simulateDataOutput.value = (simulateFluxInput * customRatio).toFixed(4);
+            } else {
+                simulateDataOutput.value = '';
+            }
+
+            if (!isNaN(simulateDataInput) && !isNaN(customRatio) && customRatio > 0) {
+                simulateFluxOutput.value = (simulateDataInput / customRatio).toFixed(4);
+            } else {
+                simulateFluxOutput.value = '';
+            }
+        }
+    </script>
+</body>
+</html>
