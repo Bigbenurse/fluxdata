@@ -63,6 +63,23 @@
             border-radius: 4px;
             font-size: 1em;
         }
+        .transaction-table, .history-table {
+            margin-top: 30px;
+            width: 80%;
+            border-collapse: collapse;
+            text-align: center;
+        }
+        .transaction-table th, .transaction-table td, .history-table th, .history-table td {
+            border: 1px solid #ddd;
+            padding: 10px;
+        }
+        .transaction-table th, .history-table th {
+            background-color: #f4f4f4;
+        }
+        .history-section {
+            margin-top: 30px;
+            width: 80%;
+        }
     </style>
 </head>
 <body>
@@ -123,6 +140,55 @@
                 <input type="text" id="simulate-flux-output" placeholder="Équiv. FLUX" readonly>
             </div>
         </div>
+
+        <!-- Tableau des transactions -->
+        <div class="transaction-table-container">
+            <h3>Tableau des Transactions</h3>
+            <table class="transaction-table">
+                <thead>
+                    <tr>
+                        <th>Type de Transaction</th>
+                        <th>Quantité</th>
+                        <th>Ratio de Transaction</th>
+                        <th>Équivalent</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>Achat DATA</td>
+                        <td><input type="number" id="data-transaction-quantity" placeholder="Quantité DATA"></td>
+                        <td><input type="number" id="data-transaction-ratio" placeholder="Ratio"></td>
+                        <td><span id="data-transaction-equivalent">-</span> FLUX</td>
+                    </tr>
+                    <tr>
+                        <td>Vente FLUX</td>
+                        <td><input type="number" id="flux-transaction-quantity" placeholder="Quantité FLUX"></td>
+                        <td><input type="number" id="flux-transaction-ratio" placeholder="Ratio"></td>
+                        <td><span id="flux-transaction-equivalent">-</span> DATA</td>
+                    </tr>
+                </tbody>
+            </table>
+            <button onclick="saveTransaction()">Enregistrer la Transaction</button>
+        </div>
+
+        <!-- Historique des transactions -->
+        <div class="history-section">
+            <h3>Historique des Transactions</h3>
+            <table class="history-table">
+                <thead>
+                    <tr>
+                        <th>Date</th>
+                        <th>Type</th>
+                        <th>Quantité</th>
+                        <th>Ratio</th>
+                        <th>Équivalent</th>
+                    </tr>
+                </thead>
+                <tbody id="history-body">
+                </tbody>
+            </table>
+            <button onclick="clearHistory()">Vider l'Historique</button>
+        </div>
     </div>
 
     <script>
@@ -165,38 +231,6 @@
             }
         });
 
-        function saveChartData() {
-            const chartData = {
-                labels: chart.data.labels,
-                data: chart.data.datasets[0].data,
-            };
-            localStorage.setItem('fluxDataChart', JSON.stringify(chartData));
-        }
-
-        function restoreChartData() {
-            const storedData = localStorage.getItem('fluxDataChart');
-            if (storedData) {
-                const { labels, data } = JSON.parse(storedData);
-                const now = new Date();
-
-                // Filtrer les données en fonction de la période sélectionnée
-                const timeRange = parseInt(document.getElementById('time-range').value) || 24; // Période choisie
-                const timeRangeAgo = new Date(now.getTime() - timeRange * 60 * 60 * 1000);
-
-                const filteredLabels = labels.filter((label) => new Date(label) >= timeRangeAgo);
-                const filteredData = data.slice(labels.length - filteredLabels.length);
-
-                // Mettre à jour le graphique
-                chart.data.labels = filteredLabels;
-                chart.data.datasets[0].data = filteredData;
-                chart.update();
-            }
-        }
-
-        function updateChartData() {
-            restoreChartData();
-        }
-
         async function fetchRatioAndUpdateChart() {
             try {
                 const fluxResponse = await fetch('https://api.binance.com/api/v3/ticker/price?symbol=FLUXUSDT');
@@ -211,52 +245,99 @@
                 currentRatio = ratio;
                 const now = new Date();
 
-                // Mettre à jour les textes
                 document.getElementById('flux-price').textContent = fluxPrice.toFixed(4);
                 document.getElementById('data-price').textContent = dataPrice.toFixed(4);
-
-                const ratioElement = document.getElementById('ratio');
-                ratioElement.textContent = ratio.toFixed(4);
-                ratioElement.style.color = ratio < 15 ? 'green' : 'blue';
-
+                document.getElementById('ratio').textContent = ratio.toFixed(4);
                 document.getElementById('timestamp').textContent = now.toLocaleTimeString();
 
-                // Ajouter les données au graphique
                 chart.data.labels.push(now);
                 chart.data.datasets[0].data.push(ratio);
 
-                // Supprimer les données plus anciennes que 24 heures
                 const twentyFourHoursAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
                 while (chart.data.labels.length > 0 && chart.data.labels[0] < twentyFourHoursAgo) {
                     chart.data.labels.shift();
                     chart.data.datasets[0].data.shift();
                 }
 
-                // Sauvegarder les données
-                saveChartData();
-
                 chart.update();
-
-                // Vérifier le seuil d'alerte
-                const alertThreshold = parseFloat(document.getElementById('alert-threshold').value);
-                if (!isNaN(alertThreshold) && ratio > alertThreshold) {
-                    alert("Le ratio a dépassé le seuil fixé !");
-                }
+                saveChartData();
             } catch (error) {
-                console.error("Erreur lors de la récupération des données : ", error);
-                document.getElementById('ratio').textContent = "Erreur : Impossible de récupérer les données.";
-                document.getElementById('ratio').style.color = 'red';
+                console.error("Erreur lors de la récupération des données :", error);
+                document.getElementById('flux-price').textContent = "Erreur";
+                document.getElementById('data-price').textContent = "Erreur";
+                document.getElementById('ratio').textContent = "Erreur";
             }
         }
 
-        setInterval(fetchRatioAndUpdateChart, 5000); // Mise à jour toutes les 5 secondes
-        restoreChartData(); // Restaurer les données au chargement de la page
+        function saveChartData() {
+            const chartData = {
+                labels: chart.data.labels,
+                data: chart.data.datasets[0].data,
+            };
+            localStorage.setItem('chartData', JSON.stringify(chartData));
+        }
+
+        function restoreChartData() {
+            const storedData = localStorage.getItem('chartData');
+            if (storedData) {
+                const { labels, data } = JSON.parse(storedData);
+                chart.data.labels = labels.map(label => new Date(label));
+                chart.data.datasets[0].data = data;
+                chart.update();
+            }
+        }
+
+        setInterval(fetchRatioAndUpdateChart, 5000);
+        fetchRatioAndUpdateChart();
+        restoreChartData();
+
+        function saveTransaction() {
+            const dataQuantity = parseFloat(document.getElementById('data-transaction-quantity').value);
+            const dataRatio = parseFloat(document.getElementById('data-transaction-ratio').value);
+            const fluxQuantity = parseFloat(document.getElementById('flux-transaction-quantity').value);
+            const fluxRatio = parseFloat(document.getElementById('flux-transaction-ratio').value);
+            const historyBody = document.getElementById('history-body');
+
+            const now = new Date().toLocaleString();
+
+            if (!isNaN(dataQuantity) && !isNaN(dataRatio) && dataRatio > 0) {
+                const equivalent = (dataQuantity / dataRatio).toFixed(4);
+                const row = `<tr><td>${now}</td><td>Achat DATA</td><td>${dataQuantity}</td><td>${dataRatio}</td><td>${equivalent} FLUX</td></tr>`;
+                historyBody.innerHTML += row;
+            }
+
+            if (!isNaN(fluxQuantity) && !isNaN(fluxRatio) && fluxRatio > 0) {
+                const equivalent = (fluxQuantity * fluxRatio).toFixed(4);
+                const row = `<tr><td>${now}</td><td>Vente FLUX</td><td>${fluxQuantity}</td><td>${fluxRatio}</td><td>${equivalent} DATA</td></tr>`;
+                historyBody.innerHTML += row;
+            }
+
+            saveHistory();
+        }
+
+        function saveHistory() {
+            const historyTable = document.getElementById('history-body').innerHTML;
+            localStorage.setItem('transactionHistory', historyTable);
+        }
+
+        function restoreHistory() {
+            const historyTable = localStorage.getItem('transactionHistory');
+            if (historyTable) {
+                document.getElementById('history-body').innerHTML = historyTable;
+            }
+        }
+
+        function clearHistory() {
+            localStorage.removeItem('transactionHistory');
+            document.getElementById('history-body').innerHTML = '';
+        }
+
+        restoreHistory();
 
         function toggleDarkMode() {
             document.body.classList.toggle('dark-mode');
         }
 
-        // Fonction pour mettre à jour les équivalents à partir de FLUX
         function updateFromFlux() {
             const fluxValue = parseFloat(document.getElementById('flux-input').value);
             const dataOutput = document.getElementById('data-output');
@@ -267,7 +348,6 @@
             }
         }
 
-        // Fonction pour mettre à jour les équivalents à partir de DATA
         function updateFromData() {
             const dataValue = parseFloat(document.getElementById('data-input').value);
             const fluxOutput = document.getElementById('flux-output');
@@ -278,7 +358,6 @@
             }
         }
 
-        // Fonction pour mettre à jour les conversions dans le simulateur
         function updateSimulation() {
             const customRatio = parseFloat(document.getElementById('custom-ratio').value);
             const simulateFluxInput = parseFloat(document.getElementById('simulate-flux-input').value);
